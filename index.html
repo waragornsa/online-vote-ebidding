@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบโหวตออนไลน์ (Online Vote System)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background-color: #f1f5f9; color: #1e293b; min-height: 100vh; display: flex; flex-direction: column; }
+    
+    header { background-color: #4f46e5; color: white; padding: 12px 16px; position: sticky; top: 0; z-index: 50; shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .header-content { max-width: 480px; margin: 0 auto; display: flex; justify-content: space-between; items-center: center; }
+    .logo { font-size: 1.125rem; font-weight: bold; display: flex; align-items: center; gap: 8px; }
+    .user-tag { font-size: 0.75rem; background-color: #4338ca; padding: 4px 10px; border-radius: 9999px; }
+
+    main { max-width: 480px; margin: 0 auto; width: 100%; padding: 16px; flex: 1; }
+    
+    .card { background: white; border-radius: 16px; padding: 20px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); margin-bottom: 16px; }
+    
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 0.875rem; font-weight: 600; margin-bottom: 6px; color: #334155; }
+    .form-group input, .form-group textarea { width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid #cbd5e1; font-size: 0.875rem; outline: none; }
+    .form-group input:focus { border-color: #4f46e5; }
+
+    .btn { width: 100%; background-color: #4f46e5; color: white; border: none; padding: 12px; border-radius: 10px; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+    .btn:hover { background-color: #4338ca; }
+    .btn-secondary { background-color: #e2e8f0; color: #475569; }
+    .btn-secondary:hover { background-color: #cbd5e1; }
+    .btn-danger { background-color: #ef4444; color: white; }
+
+    .option-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; margin-bottom: 10px; cursor: pointer; transition: 0.15s; }
+    .option-card:hover { border-color: #818cf8; background-color: #f8fafc; }
+    .option-card.selected { border-color: #4f46e5; background-color: #eeef2; border-width: 2px; }
+
+    .progress-bar { background-color: #e2e8f0; height: 8px; border-radius: 9999px; overflow: hidden; margin-top: 8px; }
+    .progress-fill { background-color: #4f46e5; height: 100%; transition: width 0.3s; }
+
+    .voter-badge { display: inline-block; background-color: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; margin-right: 4px; margin-top: 4px; }
+    
+    /* MODAL */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+    .modal-card { background: white; padding: 24px; border-radius: 16px; width: 100%; max-width: 320px; }
+    
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="header-content">
+      <div class="logo">🗳️ ระบบโหวตออนไลน์</div>
+      <div id="userInfoHeader" class="user-tag" style="display: none;">
+        <span id="headerVoterName"></span>
+        <button type="button" onclick="logoutVoter()" style="background:none; border:none; color:#c7d2fe; text-decoration:underline; cursor:pointer; margin-left:4px;">(เปลี่ยน)</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- 1. LOGIN SECTION -->
+    <div id="voterLoginSection" class="card" style="display: block;">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <div style="font-size: 2.5rem; margin-bottom: 8px;">👤</div>
+        <h2 style="font-size: 1.25rem; font-weight: bold;">ระบุข้อมูลผู้เข้าโหวต</h2>
+        <p style="font-size: 0.75rem; color: #64748b;">กรุณากรอกข้อมูลเพื่อเข้าสู่หน้าลงคะแนน</p>
+      </div>
+
+      <div class="form-group">
+        <label>ชื่อผู้โหวต <span style="color:red">*</span></label>
+        <input type="text" id="voterNameInput" placeholder="ชื่อ - นามสกุล">
+      </div>
+
+      <div class="form-group">
+        <label>สาขา รพ. <span style="color:red">*</span></label>
+        <input type="text" id="voterBranchInput" placeholder="สาขาโรงพยาบาล">
+      </div>
+
+      <button type="button" onclick="handleVoterLogin()" class="btn">เข้าสู่หน้าโหวต 🚀</button>
+
+      <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #f1f5f9; text-align: center;">
+        <button type="button" onclick="openAdminModal()" style="background:none; border:none; color:#94a3b8; font-size:0.75rem; cursor:pointer;">🔐 เข้าสู่ระบบ Admin</button>
+      </div>
+    </div>
+
+    <!-- 2. VOTING SCREEN -->
+    <div id="integratedVotingScreen" class="card" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; margin-bottom: 16px;">
+        <span style="font-size: 0.75rem; font-weight: 600; color: #4f46e5; background: #e0e7ff; padding: 2px 8px; border-radius: 9999px;">คำถามปัจจุบัน</span>
+        <span style="font-size: 0.75rem; color: #10b981; font-weight: 500;">🟢 ผลคะแนนสด Real-time</span>
+      </div>
+
+      <h2 id="activeQuestionTitle" style="font-size: 1.125rem; font-weight: bold; margin-bottom: 16px;">กำลังโหลด...</h2>
+
+      <div id="integratedOptionsContainer"></div>
+    </div>
+
+    <!-- 3. ADMIN PANEL -->
+    <div id="adminPanelSection" style="display: none;">
+      <div class="card" style="background-color: #fef3c7; border-color: #fde68a;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-size: 0.75rem; color: #78350f;">
+            <strong>⚙️ ผู้ดูแลระบบ (Admin Mode)</strong><br>ควบคุมการนำเสนอและเปลี่ยนข้อโหวต
+          </div>
+          <button type="button" onclick="logoutAdmin()" class="btn btn-secondary" style="width: auto; padding: 6px 12px; font-size: 0.75rem;">ออกจาก Admin</button>
+        </div>
+      </div>
+
+      <!-- KEYBOARD CONTROL CARD -->
+      <div class="card" style="background: #0f172a; color: white;">
+        <div style="font-size: 0.75rem; color: #fbbf24; margin-bottom: 10px;">🕹️ คีย์บอร์ดนำเสนอ Live (กด ← หรือ →)</div>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" onclick="navigateQuestion(-1)" class="btn btn-secondary" style="background:#1e293b; color:white; border:1px solid #334155;">← ข้อก่อนหน้า</button>
+          <button type="button" onclick="navigateQuestion(1)" class="btn">ข้อถัดไป →</button>
+        </div>
+      </div>
+
+      <!-- SELECT QUESTION -->
+      <div class="card">
+        <h3 style="font-size: 1rem; font-weight: bold; margin-bottom: 8px;">🎯 เลือกคำถามแสดงผลสด</h3>
+        <div id="adminQuestionsList"></div>
+      </div>
+
+      <!-- IMPORT TEXT BLOCK -->
+      <div class="card">
+        <h3 style="font-size: 1rem; font-weight: bold; margin-bottom: 4px;">📝 Import คำถาม (Text-Block)</h3>
+        <p style="font-size: 0.75rem; color: #64748b; margin-bottom: 10px;">บรรทัดแรก = คำถาม | ตัวเลือกขึ้นต้นด้วย - | เว้นบรรทัดเพื่อขึ้นข้อใหม่</p>
+        <textarea id="textBlockInput" rows="5" oninput="previewTextBlockImport()" placeholder="เมนูอาหารปีนี้?&#10;- บุฟเฟต์&#10;- ชาบู"></textarea>
+        
+        <div id="importPreviewArea" class="hidden" style="margin-top: 10px; background: #f8fafc; padding: 10px; border-radius: 8px;">
+          <strong style="font-size:0.75rem; color:#4f46e5;">ตัวอย่างที่อ่านได้ (<span id="parsedCount">0</span> ข้อ)</strong>
+          <div id="parsedQuestionsPreview" style="font-size:0.75rem; margin-top:6px;"></div>
+        </div>
+
+        <button type="button" onclick="saveImportedTextBlock()" class="btn" style="margin-top: 10px;">📥 นำเข้าคำถาม</button>
+      </div>
+
+      <!-- EDIT & DELETE -->
+      <div class="card">
+        <h3 style="font-size: 1rem; font-weight: bold; margin-bottom: 10px;">📚 จัดการคำถามทั้งหมด</h3>
+        <div id="allQuestionsManager"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ADMIN MODAL -->
+  <div id="adminModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h3 style="font-size: 1.125rem; font-weight: bold; text-align: center; margin-bottom: 16px;">🔐 เข้าสู่ระบบ Admin</h3>
+      <div class="form-group">
+        <label>ID Admin</label>
+        <input type="text" id="adminIdInput">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="adminPassInput">
+      </div>
+      <div id="adminLoginError" class="hidden" style="color:red; font-size:0.75rem; text-align:center; margin-bottom:10px;">ID หรือ Password ไม่ถูกต้อง</div>
+      <div style="display:flex; gap:8px;">
+        <button type="button" onclick="closeAdminModal()" class="btn btn-secondary">ยกเลิก</button>
+        <button type="button" onclick="handleAdminLogin()" class="btn">เข้าสู่ระบบ</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- APP STATE ---
+    let currentUser = null;
+    try {
+      const stored = localStorage.getItem('vote_user');
+      if (stored) currentUser = JSON.parse(stored);
+    } catch(e) { currentUser = null; }
+
+    let isAdminLoggedIn = sessionStorage.getItem('is_admin') === 'true';
+    let activeQuestionId = localStorage.getItem('active_question_id') || 'q1';
+    
+    let defaultQuestions = [
+      {
+        id: 'q1',
+        title: 'เมนูอาหารสำหรับการจัดเลี้ยงสังสรรค์ปีนี้คืออะไร?',
+        options: ['บุฟเฟต์อาหารนานาชาติ', 'ชาบู / หมูกระทะพรีเมียม', 'อาหารญี่ปุ่น & ซูชิ', 'เซตอาหารไทยร่วมสมัย']
+      },
+      {
+        id: 'q2',
+        title: 'ธีมการแต่งกายประจำงานเลี้ยงส่งท้ายปี?',
+        options: ['ธีมย้อนยุค (Retro 90s)', 'ธีมชุดนอนสุดชิล', 'ธีมฮีโร่และตัวการ์ตูน', 'ธีมแฟนซีชุดราตรี']
+      }
+    ];
+
+    let questions = defaultQuestions;
+    try {
+      const storedQ = localStorage.getItem('vote_questions');
+      if (storedQ) questions = JSON.parse(storedQ);
+    } catch(e) {}
+
+    let votes = {};
+    try {
+      const storedV = localStorage.getItem('vote_data');
+      if (storedV) votes = JSON.parse(storedV);
+    } catch(e) {}
+
+    let parsedImportQuestions = [];
+    const bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('online_vote_channel') : null;
+
+    // --- KEYBOARD CONTROL ---
+    window.addEventListener('keydown', (e) => {
+      if (!isAdminLoggedIn) return;
+      const el = document.activeElement;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
+
+      if (e.key === 'ArrowLeft') navigateQuestion(-1);
+      if (e.key === 'ArrowRight') navigateQuestion(1);
+    });
+
+    function navigateQuestion(direction) {
+      if (questions.length === 0) return;
+      const currentIndex = questions.findIndex(q => q.id === activeQuestionId);
+      let newIndex = currentIndex + direction;
+
+      if (newIndex < 0) newIndex = questions.length - 1;
+      if (newIndex >= questions.length) newIndex = 0;
+
+      activeQuestionId = questions[newIndex].id;
+      saveData();
+    }
+
+    // --- INITIALIZATION ---
+    window.addEventListener('DOMContentLoaded', () => {
+      initApp();
+      if (bc) {
+        bc.onmessage = (event) => {
