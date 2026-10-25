@@ -3,7 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ระบบโหวตออนไลน์ (Online Vote System)</title>
+  <title>ระบบโหวตออนไลน์ (Real-time Online Vote)</title>
+  
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
     body { background-color: #f1f5f9; color: #1e293b; min-height: 100vh; display: flex; flex-direction: column; }
@@ -29,7 +34,7 @@
 
     .option-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; margin-bottom: 10px; cursor: pointer; transition: 0.15s; }
     .option-card:hover { border-color: #818cf8; background-color: #f8fafc; }
-    .option-card.selected { border-color: #4f46e5; background-color: #eeef2; border-width: 2px; }
+    .option-card.selected { border-color: #4f46e5; background-color: #e0e7ff; border-width: 2px; }
 
     .progress-bar { background-color: #e2e8f0; height: 8px; border-radius: 9999px; overflow: hidden; margin-top: 8px; }
     .progress-fill { background-color: #4f46e5; height: 100%; transition: width 0.3s; }
@@ -85,7 +90,7 @@
     <div id="integratedVotingScreen" class="card" style="display: none;">
       <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; margin-bottom: 16px;">
         <span style="font-size: 0.75rem; font-weight: 600; color: #4f46e5; background: #e0e7ff; padding: 2px 8px; border-radius: 9999px;">คำถามปัจจุบัน</span>
-        <span style="font-size: 0.75rem; color: #10b981; font-weight: 500;">🟢 ผลคะแนนสด Real-time</span>
+        <span style="font-size: 0.75rem; color: #10b981; font-weight: 500;">🟢 ผลคะแนนสด Real-time Cloud</span>
       </div>
 
       <h2 id="activeQuestionTitle" style="font-size: 1.125rem; font-weight: bold; margin-bottom: 16px;">กำลังโหลด...</h2>
@@ -161,14 +166,33 @@
   </div>
 
   <script>
+    // --- FIREBASE SETUP ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyB2RMdhAnYPJFdbhGalwIhRbQmneCQb0ik",
+      authDomain: "hms-med-sourcing.firebaseapp.com",
+      projectId: "hms-med-sourcing",
+      storageBucket: "hms-med-sourcing.firebasestorage.app",
+      messagingSenderId: "55473080597",
+      appId: "1:55473080597:web:336c7c11db6f9af559011c"
+    };
+
+    let db = null;
+    let isCloudReady = false;
+
+    try {
+      if (typeof firebase !== 'undefined') {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+        isCloudReady = true;
+      }
+    } catch(e) { console.warn("Cloud offline", e); }
+
+    // --- APP STATE ---
     let currentUser = null;
     try {
       const stored = localStorage.getItem('vote_user');
       if (stored) currentUser = JSON.parse(stored);
-    } catch(e) { 
-      localStorage.removeItem('vote_user');
-      currentUser = null; 
-    }
+    } catch(e) { currentUser = null; }
 
     let isAdminLoggedIn = sessionStorage.getItem('is_admin') === 'true';
     let activeQuestionId = localStorage.getItem('active_question_id') || 'q1';
@@ -187,20 +211,10 @@
     ];
 
     let questions = defaultQuestions;
-    try {
-      const storedQ = localStorage.getItem('vote_questions');
-      if (storedQ) questions = JSON.parse(storedQ);
-    } catch(e) {}
-
     let votes = {};
-    try {
-      const storedV = localStorage.getItem('vote_data');
-      if (storedV) votes = JSON.parse(storedV);
-    } catch(e) {}
-
     let parsedImportQuestions = [];
-    const bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('online_vote_channel') : null;
 
+    // KEYBOARD NAVIGATION
     window.addEventListener('keydown', (e) => {
       if (!isAdminLoggedIn) return;
       const el = document.activeElement;
@@ -222,13 +236,10 @@
       saveData();
     }
 
+    // INITIALIZATION & REAL-TIME LISTENERS
     window.addEventListener('DOMContentLoaded', () => {
       initApp();
-      if (bc) {
-        bc.onmessage = (event) => {
-          if (event.data && event.data.type === 'SYNC') syncFromLocal();
-        };
-      }
+      startRealtimeSync();
     });
 
     function initApp() {
@@ -257,21 +268,47 @@
       renderAll();
     }
 
-    function syncFromLocal() {
-      try {
-        questions = JSON.parse(localStorage.getItem('vote_questions')) || defaultQuestions;
-        votes = JSON.parse(localStorage.getItem('vote_data')) || {};
-        activeQuestionId = localStorage.getItem('active_question_id') || 'q1';
-      } catch(e){}
-      renderAll();
+    function startRealtimeSync() {
+      if (!isCloudReady || !db) return;
+
+      // 1. Listen Active Question
+      db.collection('system').doc('config').onSnapshot(doc => {
+        if (doc.exists && doc.data().activeQuestionId) {
+          activeQuestionId = doc.data().activeQuestionId;
+          renderAll();
+        }
+      });
+
+      // 2. Listen Questions
+      db.collection('questions').onSnapshot(snapshot => {
+        if (!snapshot.empty) {
+          questions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          renderAll();
+        }
+      });
+
+      // 3. Listen Votes Live
+      db.collection('votes').onSnapshot(snapshot => {
+        let liveVotes = {};
+        snapshot.docs.forEach(doc => {
+          liveVotes[doc.id] = doc.data().voters || {};
+        });
+        votes = liveVotes;
+        renderAll();
+      });
     }
 
     function saveData() {
-      localStorage.setItem('vote_questions', JSON.stringify(questions));
-      localStorage.setItem('vote_data', JSON.stringify(votes));
       localStorage.setItem('active_question_id', activeQuestionId);
 
-      if (bc) bc.postMessage({ type: 'SYNC' });
+      if (isCloudReady && db) {
+        db.collection('system').doc('config').set({ activeQuestionId }, { merge: true });
+        if (votes[activeQuestionId]) {
+          db.collection('votes').doc(activeQuestionId).set({
+            voters: votes[activeQuestionId]
+          }, { merge: true });
+        }
+      }
       renderAll();
     }
 
@@ -304,9 +341,15 @@
 
     function removeUserVotes(name, branch) {
       const safeKey = (name + '_' + branch).replace(/[\.\/#$\[\]]/g, '_');
+      
       Object.keys(votes).forEach(qId => {
         if (votes[qId] && votes[qId][safeKey]) {
           delete votes[qId][safeKey];
+          if (isCloudReady && db) {
+            db.collection('votes').doc(qId).update({
+              [`voters.${safeKey}`]: firebase.firestore.FieldValue.delete()
+            });
+          }
         }
       });
       saveData();
@@ -413,7 +456,7 @@
 
           return `
             <div onclick="castVote(${item.originalIndex})" class="option-card ${isSelected ? 'selected' : ''}">
-              <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+              <div style="display:flex; justify-between; align-items:flex-start;">
                 <div>
                   <span style="font-size:0.875rem;">${rankBadge}</span>
                   <strong style="font-size:0.875rem; margin-left:4px;">${item.text}</strong>
@@ -518,6 +561,13 @@
 
       questions = questions.concat(parsedImportQuestions);
       activeQuestionId = parsedImportQuestions[0].id;
+      
+      if (isCloudReady && db) {
+        parsedImportQuestions.forEach(q => {
+          db.collection('questions').doc(q.id).set(q);
+        });
+      }
+
       document.getElementById('textBlockInput').value = '';
       document.getElementById('importPreviewArea').classList.add('hidden');
       parsedImportQuestions = [];
@@ -554,29 +604,45 @@
 
     function updateQuestionTitle(qId, newTitle) {
       const q = questions.find(item => item.id === qId);
-      if (q && newTitle.trim()) { q.title = newTitle.trim(); saveData(); }
+      if (q && newTitle.trim()) { 
+        q.title = newTitle.trim(); 
+        if (isCloudReady && db) db.collection('questions').doc(qId).update({ title: q.title });
+        saveData(); 
+      }
     }
 
     function updateOptionText(qId, optIndex, newOptText) {
       const q = questions.find(item => item.id === qId);
-      if (q && newOptText.trim()) { q.options[optIndex] = newOptText.trim(); saveData(); }
+      if (q && newOptText.trim()) { 
+        q.options[optIndex] = newOptText.trim(); 
+        if (isCloudReady && db) db.collection('questions').doc(qId).update({ options: q.options });
+        saveData(); 
+      }
     }
 
     function deleteOption(qId, optIndex) {
       const q = questions.find(item => item.id === qId);
-      if (q && q.options.length > 2) { q.options.splice(optIndex, 1); saveData(); }
-      else alert('ต้องมีอย่างน้อย 2 ตัวเลือก');
+      if (q && q.options.length > 2) { 
+        q.options.splice(optIndex, 1); 
+        if (isCloudReady && db) db.collection('questions').doc(qId).update({ options: q.options });
+        saveData(); 
+      } else alert('ต้องมีอย่างน้อย 2 ตัวเลือก');
     }
 
     function addNewOptionToQuestion(qId) {
       const q = questions.find(item => item.id === qId);
-      if (q) { q.options.push('ตัวเลือกใหม่'); saveData(); }
+      if (q) { 
+        q.options.push('ตัวเลือกใหม่'); 
+        if (isCloudReady && db) db.collection('questions').doc(qId).update({ options: q.options });
+        saveData(); 
+      }
     }
 
     function deleteQuestion(qId) {
       if (confirm('ลบคำถามนี้?')) {
         questions = questions.filter(q => q.id !== qId);
         if (activeQuestionId === qId && questions.length > 0) activeQuestionId = questions[0].id;
+        if (isCloudReady && db) db.collection('questions').doc(qId).delete();
         saveData();
       }
     }
